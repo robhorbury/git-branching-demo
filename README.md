@@ -20,7 +20,7 @@ new file, and then commit it.
 ```sh
 touch A
 git add A
-git commit A -m "Added A"
+git commit A -m "A"
 ```
 We now have a file called `A` in our repo.
 
@@ -58,14 +58,14 @@ We will make two changes, Create a file called `B` and commit it:
 ```sh
 touch B
 git add B
-git commit B -m "added B"
+git commit B -m "B"
 ```
 Do the same again, but for a file called `C`
 
 ```sh
 touch C
 git add C
-git commit C -m "added C"
+git commit C -m "C"
 ```
 Our repo will now look like this:
 ```
@@ -120,10 +120,10 @@ Lets try that - first we will add new files and commit on main:
 git checkout main
 touch D
 git add D
-git commit D -m "added D"
+git commit D -m "D"
 touch E
 git add E
-git commit E -m "added E"
+git commit E -m "E"
 ```
 Now we have this:
 ```
@@ -209,12 +209,13 @@ _feature branch_ on _main_. This means we need to checkout the feature branch:
 
 ```sh
 git checkout step2
+git checkout -b step2-to-rebase
 git rebase main_to_use_in_rebase
 ```
 
 Notice the state of the repo:
 ```
-            B --- C   *step2
+            B --- C   *step2-to-rebase
            /
   A - D - E           main_to_use_in_rebase
 ```
@@ -226,7 +227,7 @@ Notice that `step2` no longer diverges from `main_to_use_in_rebase` - i.e we
 can _fast forward_ merge it:
 ```sh
 git checkout main_to_use_in_rebase
-git merge step2
+git merge step2-to-rebase
 ```
 and now:
 ```
@@ -259,8 +260,8 @@ conflict with their branch.
 
 >[!IMPORTANT]
 > For this reason, it is best practice to **only** rebase local branches, or
-> feature branches that only you are working on. You should not rebase the main
-> branch, or shared branches
+> feature branches that only you are working on. You should not rebase any
+> branch upon which others have based their history.
 
 ### Dealing with conflicts
 
@@ -274,3 +275,243 @@ When we rebase, we will deal with the conflicts as the branch is rebased.
 When we resolve the issues, there will be no record on the conflict occuring,
 since the history will be updated in the rebase.
 
+Lets create a conflict and deal with it. This is our current state:
+
+```
+     B --- C   step2
+   /
+  A - D - E    main
+```
+Lets add a line to our file on main:
+
+```sh
+git checkout main
+echo "Added a line from main branch" > A
+git commit A -m "A1"
+```
+We have now added a line to the top of our `A` file. Lets do something similar
+from `step2`:
+
+```sh
+git checkout step2
+echo "Added a line from step2 branch" > A
+git commit A -m "A2"
+```
+
+Now we have this:
+
+```
+     B -- C - A2    step2
+   /
+  A - D - E - A1    main
+```
+
+The commits A1 & A2 will conflict with eachother. Lets see how we would resolve
+this in a merge. We wil once again create a new branch, and merge step2 into
+main.
+
+```sh
+git checkout main
+git checkout -b main_to_merge_with_conflict
+git checkout merge step2
+```
+You will notice a conflict:
+```
+Auto-merging A
+CONFLICT (content): Merge conflict in A
+Recorded preimage for 'A'
+Automatic merge failed; fix conflicts and then commit the result.
+```
+If we take a look at A:
+```
+cat A
+
+<<<<<<< HEAD
+Added from main
+=======
+Added from step2
+>>>>>>> step2
+
+```
+This is the representation of the conflict. `HEAD` refers to changes from the
+current branch (main_to_merge_with_conflict), and `step2` shows our changes
+from the branch we are merging in.
+
+What this is telling us, is that we need to decide which change we want to keep
+in our merged branch. To do this, we can go into the file, and delete the
+changes from the branch we don't want.
+
+Open the `A` file and select the changes from step2, the file should look like
+this:
+```
+Added from step2
+```
+we now need to commit our changes:
+```
+git add .
+git commit
+```
+Once more, you will see that we have a merge commit generated. This merge
+commit will contain the resolution of the conflict.
+
+Take a look at the git graph - Once more, we have a non-linear history, showing
+us that a merge took place.
+
+
+Now lets try the same, but using rebase:
+
+```sh
+git checkout main
+git checkout -b main-to-resolve-conflict-rebase
+git checkout step2
+git checkout -b step2-to-use-in-rebase
+
+git rebase main-to-resolve-conflict-rebase
+```
+
+Once more, we have a merge conflict, lets take a look at `A` once again:
+
+```
+cat A
+
+<<<<<<< HEAD
+Added from main
+=======
+Added from step2
+>>>>>>> d17e956 (A2)
+```
+
+This looks similar to before - however something is different.
+
+The `HEAD` here seems to be referenceing the main branch - that is strange,
+since when we ran the `git rebase` command, we were on our `step2` branch.
+
+This tells us how rebase works - when we run rebase from `step2`, git checks out
+the other branch, and plays the commits from `step2` onto it. This is why it
+looks like the 'current change' is from `main`, and the `incomming change` is
+from `step2`.
+
+We can resolve this conflict again - lets select the changes from the main
+branch again.
+
+Once this is done, we can continue the rebase:
+```sh
+git add A
+git rebase --continue
+```
+
+We have succesfully rebased, lets take a look at the git log:
+
+```
+                 B - C   *step2-to-rebase
+                /
+  A - D - E - A1          main_to_use_in_rebase
+```
+
+Once again, we have a linear history - but look carefully, we no longer have
+and `A2` commit. This is because in the rebase, we selected changes from the
+`A1` commit, therefore there is no need to keep the A2 commit.
+
+This is an example of rebase rewritting history on our feature branch. We have
+resolved the conflict, and our branch is now up-to-date, but we have _lost_ some
+history from our feature branch.
+
+You could argue that this doesn't matter, since the A2 commit was useless
+anyway, since we selected A1. Equally you could argue that this is dangerous,
+because there is now no record of A2 in git at all - We cannot revert to it.
+
+> [!NOTE]
+> In some situations (continual rebasing, or continual merging) we may need to
+> resolve the _same conflict_ multiple times. This can be really annoying.
+>
+> One way to fix this, is to ask git to _reuse recorded resolutions_. What this
+> means is that git will remember how we have fixed specific conflicts in the
+> past, and if that conflict ever occurs again, it will use the same resolution.
+>
+> To turn this on, simply run:
+> ```sh
+> git config --global rerere.enabled true
+> ```
+
+## Cherry Picking
+
+Cherry picking allows us to select specfic commits to pull into our branch.
+
+This can be incredibly useful if we want to select a specific feature, or
+if we want to exclude specific commits that we know caused a bug.
+
+Cherry picking can be made easier by the following considerations:
+  - Linear History: Whist not strictly neccessary, it can be a lot easier to work
+  out what commits you need when you have a linear history.
+  - Good commit practices: If a single commit contains 3 different features and
+  bug fixes, we won't be able to differentiate between them. We can either take
+  all of the changes in that commit, or none of them. If we keep our commits small,
+  and try to use one commit per feature, bugfix etc as a MAXIMUM, then cherry
+  picking will be much easier
+
+Lets have a go at cherry picking, we can reuse the state from the above step,
+after the rebase:
+```
+                 B - C   *step2-to-rebase
+                /
+  A - D - E - A1          main_to_use_in_rebase
+```
+
+In this situation, lets say that I really need file `C` on the
+`main_to_use_in_rebase` branch. I have a couple of options:
+
+  1. I could manually create the file, or manually copy and paste the file
+  2. I could cherry pick the commit that creates the file.
+
+Option 1 is simple, but will cause us problems. By manually adding the file and
+commiting it, we are creating a _new commit_. This commit is different to the
+commit on `step2-to-rebase`, and therefore has the potential to create a
+conflict.
+
+Option 2 will copy the _exact same commit_ to the branch - meaning we won't have
+any conflict - a commit cannot conflict with itself.
+
+Lets do it, first, we will need to get the commit hash for `C`
+```sh
+git checkout step2-to-rebase
+git log --oneline
+```
+We can now see the commit hash for `C` - we need to remember that.
+
+Now we can checkout our other branch, and cherry pick that commit
+
+```sh
+git checkout main_to_use_in_rebase
+git cherry-pick <commit-hash>
+```
+
+we can see that `C` has been created on our main branch, but not B - Success!
+
+Currently we have this setup:
+
+```
+                 B - C       step2-to-rebase
+                /
+  A - D - E - A1 - C         *main_to_use_in_rebase
+```
+
+Because we have the same commit on both of our branches, we can actually rebase
+`step2-to-rebase` on `main_to_use_in_rebase`, and it should simplify the
+history:
+
+```sh
+git checkout step2-to-rebase
+git rebase main_to_use_in_rebase
+```
+Now we have this:
+```
+                     B       step2-to-rebase
+                    /
+  A - D - E - A1 - C         *main_to_use_in_rebase
+```
+
+Note that we have no conflict, and we have effectively just taken the specific
+feature we want from our branch. In this case we still have a linear history.
+
+I think this give us an idea of how powerful cherry-picking and rebasing can be
+when used properly.
